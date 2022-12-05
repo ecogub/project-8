@@ -70,17 +70,19 @@ q_df <- read_feather(q_file_path) %>%
     rename(q_lps = val) %>%
     select(datetime, site_code, q_lps)
 
-# precip_file_path <- here('src', 'ws_traits_subannual', site_info$domain[[1]],'ws_traits','cc_precip', paste0('raw_',target_site,'.feather'))
-#
-# precip_df <- read_feather(precip_file_path) %>%
-#     pivot_wider(names_from = var, values_from = val, id_cols = c(datetime))
-#
-# gpp_file_path <- here('src', 'ws_traits_subannual', site_info$domain[[1]],'ws_traits','gpp', paste0('raw_',target_site,'.feather'))
-#
-# gpp_df <- read_feather(gpp_file_path) %>%
-#     pivot_wider(names_from = var, values_from = val, id_cols = c(datetime))
+precip_file_path <- here('src', 'ws_traits_subannual', site_info$domain[[1]],'ws_traits','cc_precip', paste0('raw_',target_site,'.feather'))
+
+precip_df <- read_feather(precip_file_path) %>%
+    pivot_wider(names_from = var, values_from = val, id_cols = c(datetime))
+
+gpp_file_path <- here('src', 'ws_traits_subannual', site_info$domain[[1]],'ws_traits','gpp', paste0('raw_',target_site,'.feather'))
+
+gpp_df <- read_feather(gpp_file_path) %>%
+    pivot_wider(names_from = var, values_from = val, id_cols = c(datetime))
 
 comb_df <- full_join(chem_df, q_df, by = c('site_code', 'datetime')) %>%
+    full_join(., gpp_df, by = 'datetime') %>%
+    full_join(., precip_df, by = 'datetime') %>%
     mutate(wy = water_year(datetime, origin = 'usgs'))
 
 # check there is enough chem data
@@ -96,18 +98,24 @@ out_df <- comb_df %>%
     filter(wy %in% good_years) %>%
     mutate(con = na_interpolation(con, option = 'linear'),
            q_lps = na_interpolation(q_lps, option = 'linear'),
+           cc_precip_median = na_interpolation(cc_precip_median, option = 'linear'),
+           va_gpp_median = na_interpolation(va_gpp_median, option = 'linear'),
            q_day = q_lps*86400,
            flux_kg_day = q_day*con*1e6,
-           load_day = flux_kg_day/area) %>%
-    group_by(wy) %>% #grouping by water year
+           load_day = flux_kg_day/area,
+           month = month(datetime)) %>%
+    group_by(wy, month) %>% #grouping by water year
     # ADD MORE ANNUAL STUFF BELOW
     summarize(load = sum(load_day),
               yield = sum(q_day),
               load_yield_adj= load/yield,
-              pH_mean = mean(na.omit(pH))) %>%
+              pH_mean = mean(na.omit(pH)),
+              gpp_mean = va_gpp_median,
+              precip_mean = cc_precip_median) %>%
     left_join(., trait_df, by = 'wy')
 
 return(out_df)
 }
 
+#load_yield_adj is what we are trying to predict
 # then run random forest on years prior to 1990 and current years
